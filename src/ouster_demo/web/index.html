@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>General Autonomy · Ouster Lidar Perception</title>
+  <link rel="icon" href="/assets/favicon.png" type="image/png">
+  <link rel="stylesheet" href="/style.css">
+  <script type="importmap">
+    { "imports": { "three": "/vendor/three.module.min.js" } }
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/assets/logo-full.png" alt="General Autonomy">
+      <div class="brand-sep"></div>
+      <div class="product">
+        <span class="eyebrow">Physical AI · Perception</span>
+        <span class="title">Ouster lidar · live perception</span>
+      </div>
+    </div>
+
+    <div class="spacer"></div>
+
+    <form class="source" id="sourceForm" autocomplete="off">
+      <label for="sourceInput">Source</label>
+      <input id="sourceInput" list="sourceOptions" spellcheck="false"
+             placeholder="Sensor IP or hostname · 192.168.1.50 · os-122xxx.local">
+      <datalist id="sourceOptions"></datalist>
+      <button type="submit" class="btn primary">Connect</button>
+    </form>
+
+    <div class="status-pill" id="statusPill" data-state="connecting"><i></i><span id="statusText">Connecting</span></div>
+  </header>
+
+  <main>
+    <canvas id="view"></canvas>
+    <div id="labels"></div>
+
+    <aside class="panel left" id="scenePanel">
+      <h3>Scene</h3>
+      <div class="seg" id="colorMode" role="group" aria-label="Point colour">
+        <button data-mode="2" class="on">Class</button>
+        <button data-mode="0">Height</button>
+        <button data-mode="1">Intensity</button>
+        <button data-mode="3">Range</button>
+      </div>
+
+      <label class="toggle"><input type="checkbox" id="tGround" checked><span>Ground points</span></label>
+      <label class="toggle"><input type="checkbox" id="tBoxes" checked><span>3D boxes &amp; labels</span></label>
+      <label class="toggle"><input type="checkbox" id="tTrails" checked><span>Motion trails</span></label>
+      <label class="toggle"><input type="checkbox" id="tRings" checked><span>Range rings</span></label>
+
+      <div class="slider"><div class="row"><span>Point size</span><b id="vSize">2.0</b></div>
+        <input type="range" id="sSize" min="1" max="5" step="0.5" value="2"></div>
+
+      <div class="viewbtns">
+        <button class="btn" id="vChase">Chase</button>
+        <button class="btn" id="vTop">Top</button>
+        <button class="btn" id="vSpin">Auto-orbit</button>
+      </div>
+
+      <details>
+        <summary>Perception tuning</summary>
+        <div class="slider"><div class="row"><span>Max range (m)</span><b id="vRange">45</b></div>
+          <input type="range" id="pRange" data-key="max_range_m" min="10" max="120" step="1"></div>
+        <div class="slider"><div class="row"><span>Max height (m)</span><b id="vHeight">4.5</b></div>
+          <input type="range" id="pHeight" data-key="max_height_m" min="1" max="10" step="0.5"></div>
+        <div class="slider"><div class="row"><span>Ground tolerance (m)</span><b id="vGround">0.18</b></div>
+          <input type="range" id="pGround" data-key="ground_thresh_m" min="0.05" max="0.5" step="0.01"></div>
+        <div class="slider"><div class="row"><span>Cluster gap (m)</span><b id="vEps">0.55</b></div>
+          <input type="range" id="pEps" data-key="cluster_eps_m" min="0.3" max="1.5" step="0.05"></div>
+        <div class="slider"><div class="row"><span>Min points / object</span><b id="vMin">25</b></div>
+          <input type="range" id="pMin" data-key="min_cluster_points" min="5" max="150" step="1"></div>
+      </details>
+    </aside>
+
+    <aside class="panel right" id="objectsPanel">
+      <h3>Detected objects <span class="count" id="objCount">0</span></h3>
+      <div class="legend">
+        <span><i style="--c:#40b4de"></i>Vehicle</span>
+        <span><i style="--c:#f5811f"></i>Pedestrian</span>
+        <span><i style="--c:#f5c04a"></i>Cyclist</span>
+        <span><i style="--c:#5b6b80"></i>Structure</span>
+      </div>
+      <div class="objlist" id="objList"></div>
+    </aside>
+
+    <footer class="hud">
+      <div class="metric"><span>FPS</span><b id="mFps">–</b></div>
+      <div class="metric"><span>Points</span><b id="mPts">–</b></div>
+      <div class="metric"><span>Objects</span><b id="mObj">–</b></div>
+      <div class="metric"><span>Latency</span><b id="mLat">–</b></div>
+      <div class="metric wide">
+        <span>Pipeline <em id="mTotal">–</em></span>
+        <div class="stack" id="stageBar" title="ground · cluster · boxes · track"></div>
+        <div class="stagelegend"><i class="s1"></i>ground <i class="s2"></i>cluster <i class="s3"></i>boxes <i class="s4"></i>track</div>
+      </div>
+      <div class="metric sensor"><span>Sensor</span><b id="mSensor">–</b><em id="mSensorSub"></em></div>
+    </footer>
+
+    <div class="overlay" id="overlay" hidden>
+      <div class="card">
+        <div class="spinner" id="spin"></div>
+        <h2 id="ovTitle">Connecting…</h2>
+        <p id="ovMsg"></p>
+        <pre id="ovHint"></pre>
+      </div>
+    </div>
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

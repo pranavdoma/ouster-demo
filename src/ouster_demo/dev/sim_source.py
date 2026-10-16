@@ -1,4 +1,4 @@
-"""Built-in Ouster simulator.
+"""Test-only Ouster-like simulator (NOT part of the product; used by the test-suite).
 
 Not a toy point generator: it builds a genuine Ouster ``SensorInfo`` (128 beams
 with real OS0 / OS1 / OS2 elevation spreads), ray-casts an urban scene through the
@@ -28,30 +28,6 @@ MODELS = {
 }
 
 SENSOR_HEIGHT_M = 1.8  # sensor origin above ground
-
-
-def build_sensor_info(model: str, columns: int = 1024):
-    """Return an SDK SensorInfo describing a 128-beam OS0/OS1/OS2."""
-    from ouster.sdk import core
-
-    prod, half_fov, _, offset_mm = MODELS[model]
-    mode = {512: core.LidarMode._512x10, 1024: core.LidarMode._1024x10, 2048: core.LidarMode._2048x10}[columns]
-    d = json.loads(core.SensorInfo.from_default(mode).to_json_string())
-    rows = 128
-    alt = np.linspace(half_fov, -half_fov, rows)
-    d["beam_intrinsics"]["beam_altitude_angles"] = [round(float(a), 3) for a in alt]
-    d["beam_intrinsics"]["beam_azimuth_angles"] = [0.0] * rows
-    d["beam_intrinsics"]["lidar_origin_to_beam_origin_mm"] = offset_mm
-    t = d["beam_intrinsics"]["beam_to_lidar_transform"]
-    t[3] = offset_mm
-    ldf = d["lidar_data_format"]
-    ldf["pixels_per_column"] = rows
-    ldf["pixel_shift_by_row"] = [0] * rows
-    ldf["udp_profile_lidar"] = "LEGACY"
-    d["sensor_info"]["prod_line"] = prod
-    d["sensor_info"]["prod_sn"] = "SIM0000001"
-    d["sensor_info"]["image_rev"] = "sim"
-    return core.SensorInfo(json.dumps(d))
 
 
 @dataclass
@@ -140,8 +116,6 @@ def _scene(rng: np.random.Generator) -> List[Actor]:
 
 class SimSource(FrameSource):
     def __init__(self, model: str = "os0", fps: float = 10.0, columns: int = 1024, seed: int = 7, realtime: bool = True):
-        from ouster.sdk import core
-
         model = model.lower()
         if model not in MODELS:
             raise ValueError(f"unknown sim model {model!r}; choose from {sorted(MODELS)}")
@@ -149,10 +123,8 @@ class SimSource(FrameSource):
         self._fps = fps
         self._realtime = realtime
         self._rng = np.random.default_rng(seed)
-        self._info = build_sensor_info(model, columns)
-        self._lut = core.XYZLut(self._info)
         self._max_range = MODELS[model][2]
-        rows = int(self._info.format.pixels_per_column)
+        rows = 128
         self._shape = (rows, columns)
         self._origins, self._dirs = self._beam_rays()
         self.actors = _scene(self._rng)
@@ -171,13 +143,13 @@ class SimSource(FrameSource):
         return self._meta
 
     def _beam_rays(self):
-        """Recover exact per-pixel ray origin/direction from the SDK lookup table."""
+        """Per-pixel ray origin/direction from analytic OS0/OS1/OS2 beam angles (128 rows)."""
         h, w = self._shape
-        p1 = self._lut(np.full((h, w), 10_000, dtype=np.uint32))   # 10 m
-        p2 = self._lut(np.full((h, w), 20_000, dtype=np.uint32))   # 20 m
-        d = (p2 - p1) / 10.0
-        d /= np.linalg.norm(d, axis=2, keepdims=True)
-        o = p1 - d * 10.0
+        half_fov = MODELS[self._model][1]
+        alt = np.deg2rad(np.linspace(half_fov, -half_fov, h))[:, None]
+        az = np.deg2rad(-np.arange(w) * 360.0 / w)[None, :]     # Ouster scans clockwise
+        d = np.stack([np.cos(alt) * np.cos(az), np.cos(alt) * np.sin(az), np.sin(alt) + 0 * az], axis=2)
+        o = np.zeros_like(d)
         return o.reshape(-1, 3), d.reshape(-1, 3)
 
     def _cast(self):
@@ -246,7 +218,7 @@ class SimSource(FrameSource):
         t = t + self._rng.normal(0.0, 0.015, t.shape)
         valid = np.isfinite(t) & (t > 0.3) & (t < self._max_range) & (self._rng.random(t.shape) > 0.01)
         range_mm = np.where(valid, np.round(t * 1000.0), 0).astype(np.uint32).reshape(h, w)
-        xyz = np.asarray(self._lut(range_mm), dtype=np.float32)
+        xyz = (self._dirs.reshape(h, w, 3) * (range_mm[..., None] * 0.001)).astype(np.float32)
         refl_img = np.clip(refl + self._rng.normal(0, 4, refl.shape), 0, 255).astype(np.uint8).reshape(h, w)
         refl_img[range_mm == 0] = 0
         return Frame(

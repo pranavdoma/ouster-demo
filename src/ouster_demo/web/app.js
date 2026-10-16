@@ -25,9 +25,9 @@ const renderer = new THREE.WebGLRenderer({ canvas: el.canvas, antialias: true, p
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 600);
-camera.position.set(-20, 15, 0);
+camera.position.set(-9, 7, 0);
 const controls = new OrbitControls(camera, el.canvas);
-controls.target.set(8, 0, 0);
+controls.target.set(2, 0, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.495;
@@ -48,7 +48,7 @@ geom.setDrawRange(0, 0);
 
 const pointMat = new THREE.ShaderMaterial({
   uniforms: {
-    uSize: { value: 2.0 }, uMode: { value: 2 }, uShowGround: { value: 1 },
+    uSize: { value: 3.0 }, uMode: { value: 2 }, uShowGround: { value: 1 },
     uPx: { value: renderer.getPixelRatio() }, uGroundY: { value: -1.8 },
   },
   vertexShader: /* glsl */ `
@@ -84,7 +84,7 @@ const pointMat = new THREE.ShaderMaterial({
         if (uShowGround < .5) gl_Position = vec4(2., 2., 2., 1.);
         if (uMode > 1.5 && uMode < 2.5) vA = .75;
       }
-      gl_PointSize = clamp(uSize * uPx * (34.0 / -mv.z), 1.3 * uPx, 7.5 * uPx);
+      gl_PointSize = clamp(uSize * uPx * (24.0 / -mv.z), 1.5 * uPx, 9.0 * uPx);
     }`,
   fragmentShader: /* glsl */ `
     varying vec3 vColor; varying float vA;
@@ -103,23 +103,23 @@ const rings = new THREE.Group();
 scene.add(rings);
 (function buildRings() {
   const mat = (a) => new THREE.LineBasicMaterial({ color: 0xf5811f, transparent: true, opacity: a });
-  for (const r of [10, 20, 30, 40, 50]) {
+  for (const r of [2, 5, 10, 20, 40]) {
     const pts = [];
     for (let i = 0; i <= 128; i++) pts.push(new THREE.Vector3(Math.cos((i / 128) * 2 * Math.PI) * r, 0, Math.sin((i / 128) * 2 * Math.PI) * r));
-    rings.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat(r === 10 ? 0.38 : 0.2)));
+    rings.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat(r === 5 ? 0.38 : 0.2)));
   }
   const axis = new THREE.BufferGeometry().setFromPoints([
-    new THREE.Vector3(-52, 0, 0), new THREE.Vector3(52, 0, 0), new THREE.Vector3(0, 0, -52), new THREE.Vector3(0, 0, 52),
+    new THREE.Vector3(-42, 0, 0), new THREE.Vector3(42, 0, 0), new THREE.Vector3(0, 0, -42), new THREE.Vector3(0, 0, 42),
   ]);
   rings.add(new THREE.LineSegments(axis, mat(0.12)));
   // forward marker (sensor +X)
-  const tri = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(3.2, 0, 0), new THREE.Vector3(1.6, 0, 0.9), new THREE.Vector3(1.6, 0, -0.9), new THREE.Vector3(3.2, 0, 0)]);
+  const tri = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(1.0, 0, 0), new THREE.Vector3(0.5, 0, 0.3), new THREE.Vector3(0.5, 0, -0.3), new THREE.Vector3(1.0, 0, 0)]);
   rings.add(new THREE.Line(tri, new THREE.LineBasicMaterial({ color: 0xf5811f })));
 })();
 
 /* sensor glyph */
 const sensorGlyph = new THREE.Mesh(
-  new THREE.CylinderGeometry(0.22, 0.22, 0.33, 24),
+  new THREE.CylinderGeometry(0.06, 0.06, 0.09, 24),
   new THREE.MeshBasicMaterial({ color: 0xf5811f }),
 );
 scene.add(sensorGlyph);
@@ -177,7 +177,7 @@ function updateTracks(list) {
     const [cx, cy, cz] = t.c;
     const [l, w, h] = t.s;
     const faint = NO_LABEL.has(t.cls);
-    e.group.visible = ui.boxes;
+    e.group.visible = ui.boxes && !faint;   // walls/poles: points only, no wireframe clutter
     e.group.position.set(cx, cz, -cy);
     e.group.rotation.set(0, t.yaw, 0);
     e.group.scale.set(l, h, w);
@@ -414,8 +414,8 @@ function tween(pos, target) {
   };
   step();
 }
-$("vChase").onclick = () => tween(new THREE.Vector3(-20, 15, 0), new THREE.Vector3(8, 0, 0));
-$("vTop").onclick = () => tween(new THREE.Vector3(0.01, 75, 0), new THREE.Vector3(0, 0, 0));
+$("vChase").onclick = () => tween(new THREE.Vector3(-9, 7, 0), new THREE.Vector3(2, 0, 0));
+$("vTop").onclick = () => tween(new THREE.Vector3(0.01, 22, 0), new THREE.Vector3(0, 0, 0));
 $("vSpin").onclick = (e) => { ui.spin = !ui.spin; e.target.classList.toggle("on", ui.spin); };
 
 /* perception sliders */

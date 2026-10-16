@@ -39,7 +39,8 @@ def _serve(args: argparse.Namespace) -> int:
         s.loop = False
 
     print(f"\n  General Autonomy x Ouster  |  source={s.source or '(enter sensor IP in the UI)'}")
-    print(f"  Open http://localhost:{s.port}  (or http://<this-pc-ip>:{s.port} from another machine)\n")
+    url = "http://genauto.localhost" + ("" if s.port == 80 else f":{s.port}")
+    print(f"  Open {url}   (any *.localhost name resolves to this PC; or http://<this-pc-ip>:{s.port} from another machine)\n")
     uvicorn.run(create_app(s), host=s.host, port=s.port, log_level=args.log_level)
     return 0
 

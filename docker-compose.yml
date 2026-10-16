@@ -1,0 +1,18 @@
+services:
+  ouster-demo:
+    build: .
+    image: ouster-demo:latest
+    container_name: ouster-demo
+    # REQUIRED for a real sensor: the Ouster streams UDP to this machine, and Docker's
+    # bridge network breaks that (and mDNS). Host networking makes the container behave
+    # like a native process. (Linux only; on Mac/Windows run natively - see README.)
+    network_mode: host
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OUSTER_SOURCE: ${OUSTER_SOURCE:-}
+      PORT: ${PORT:-8080}
+    volumes:
+      - ./data:/data   # drop .pcap + .json recordings here, then use /data/<file>.pcap as the source

@@ -36,14 +36,22 @@
 
   <main>
     <canvas id="view"></canvas>
+    <div class="pane" id="paneBev"><span class="pane-cap">BEV <em>top-down · 2 · 5 · 10 · 20 · 40 m rings</em></span></div>
+    <div class="pane" id="pane3d"><span class="pane-cap">3D <em>orbit</em></span></div>
     <div id="labels"></div>
 
     <aside class="panel left" id="scenePanel">
       <h3>Scene</h3>
-      <div class="seg" id="colorMode" role="group" aria-label="Point colour">
-        <button data-mode="2" class="on">Class</button>
+      <div class="seg three" id="layoutMode" role="group" aria-label="Layout">
+        <button data-layout="split" class="on">Split</button>
+        <button data-layout="bev">BEV</button>
+        <button data-layout="3d">3D</button>
+      </div>
+      <div class="seg five" id="colorMode" role="group" aria-label="Point colour">
+        <button data-mode="4" class="on">Scan</button>
+        <button data-mode="2">Class</button>
         <button data-mode="0">Height</button>
-        <button data-mode="1">Intensity</button>
+        <button data-mode="1">Intens.</button>
         <button data-mode="3">Range</button>
       </div>
 
@@ -52,8 +60,8 @@
       <label class="toggle"><input type="checkbox" id="tTrails" checked><span>Motion trails</span></label>
       <label class="toggle"><input type="checkbox" id="tRings" checked><span>Range rings</span></label>
 
-      <div class="slider"><div class="row"><span>Point size</span><b id="vSize">3.0</b></div>
-        <input type="range" id="sSize" min="1" max="8" step="0.5" value="3"></div>
+      <div class="slider"><div class="row"><span>Point size</span><b id="vSize">1.6</b></div>
+        <input type="range" id="sSize" min="0.5" max="4" step="0.1" value="1.6"></div>
 
       <div class="viewbtns">
         <button class="btn" id="vChase">Chase</button>

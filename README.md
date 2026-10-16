@@ -13,7 +13,17 @@ Real Ouster sensor → real-time perception → browser UI. One container, no cl
 > Verified on an **OS0-32, firmware 2.1.2**. Because that firmware predates the SDK 1.x metadata API, the SDK is
 > pinned to **`ouster-sdk==0.12.0`**. If you have newer firmware (≥ 3.x) you can try a newer SDK.
 
-## Run it (Docker, recommended)
+## Run it (one file)
+
+```bash
+./launch.sh                 # start (sensor IP from .env, default 169.254.43.8) -> http://genauto.localhost
+./launch.sh 192.168.1.50    # start against a specific sensor
+./launch.sh stop | status | logs | doctor | discover | native
+```
+
+All instructions are also in the header of [`launch.sh`](launch.sh).
+
+## Run it (Docker, manual)
 
 ```bash
 cp .env.example .env          # set OUSTER_SOURCE=<sensor ip>   (or leave empty and type it in the UI)

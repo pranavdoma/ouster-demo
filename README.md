@@ -1,90 +1,78 @@
 # General Autonomy × Ouster: live lidar perception demo
 
-Plug in an Ouster sensor (OS0 / OS1 / OS2), open a browser, see the live 3D point cloud with
-real-time perception on top: ground removal, object detection with oriented 3D boxes,
-classification (pedestrian / cyclist / vehicle / structure) and multi-object tracking with speed.
+Real Ouster sensor → real-time perception → browser UI. One container, no cloud, no GPU, no model downloads.
 
-* **Source:** a real Ouster sensor via the official [Ouster SDK](https://github.com/ouster-lidar/ouster-sdk) (`ouster-sdk==1.0.1`).
-  `.pcap` / `.osf` recordings work through the same code path.
-* **Perception:** classical, CPU-only, no model downloads. RANSAC ground plane → voxel-connectivity
-  clustering → minimum-area oriented boxes → rule-based classification → Kalman filter + Hungarian tracker.
-  ~20 ms/frame for a 128×1024 frame, so it keeps up with a 10 Hz sensor.
-* **UI:** Three.js viewer in General Autonomy branding, served by FastAPI over a binary WebSocket.
-  All assets (Three.js, fonts, logo) are vendored, so it runs on an offline lab network.
+* **Stream**: Ouster SDK (live sensor, or `.pcap`/`.osf` replay) → 3D point cloud at the sensor frame rate
+* **Perception** (CPU, ~20 ms/frame): ground-plane RANSAC → voxel/Euclidean clustering → oriented 3D boxes →
+  rule-based classification (pedestrian / cyclist / car / truck / structure) → Kalman multi-object tracking
+  (IDs, speed, heading, trails)
+* **UI**: Three.js viewer in General Autonomy branding. Colour by class / height / intensity / range, live
+  tuning sliders, object list, pipeline timing, one-click source switching. Fully offline (no CDN).
 
-## Run it
+> Verified on an **OS0-32, firmware 2.1.2**. Because that firmware predates the SDK 1.x metadata API, the SDK is
+> pinned to **`ouster-sdk==0.12.0`**. If you have newer firmware (≥ 3.x) you can try a newer SDK.
 
-### Docker (any Linux PC)
+## Run it (Docker, recommended)
 
 ```bash
 cp .env.example .env          # set OUSTER_SOURCE=<sensor ip>   (or leave empty and type it in the UI)
 docker compose up -d --build
-# open http://localhost:8080
+# open http://localhost:8080   (or http://<this-pc-ip>:8080 from another machine)
 ```
 
-`docker-compose.yml` uses `network_mode: host`. That is **required**: the sensor pushes UDP to the
-host, and Docker's bridge network breaks it. (Linux only; on macOS/Windows use the native install.)
+Docker uses `network_mode: host` on purpose: the sensor pushes UDP to this machine and bridge networking breaks
+that. Linux only. On macOS/Windows run natively.
 
-### Native
+## Run it (native)
 
 ```bash
-make install                  # creates .venv, installs the package
-make run SENSOR=192.168.1.50  # or: .venv/bin/ouster-demo --source 192.168.1.50
+make install
+make run SENSOR=192.168.1.50          # or: .venv/bin/ouster-demo --source 192.168.1.50
 ```
 
-Python ≥ 3.9. Open `http://localhost:8080` (or `http://<this-pc>:8080` from another machine).
-The sensor can be changed live from the **Source** box in the UI.
+Requires Python ≥ 3.9. Sensor on a direct cable with no DHCP? It uses a link-local `169.254.x.x` address:
+find it with `ip neigh` / `ouster-demo discover` and give your NIC an address on that link.
 
-## When the sensor does not behave
+## When something is wrong
 
 ```bash
-ouster-demo discover                       # find sensors on the LAN
-ouster-demo doctor <SENSOR_IP> --sdk       # DNS → ping → HTTP API → config → UDP → SDK decode
+ouster-demo doctor <sensor-ip> --sdk     # DNS → ping → HTTP API → config → UDP → SDK decode, with fixes
 ```
 
-The UI also shows the failure and hints on screen. Full checklist: **[docs/LAB_DEBUG.md](docs/LAB_DEBUG.md)**.
+The UI shows the same failure as an overlay card. Full playbook: [docs/LAB_DEBUG.md](docs/LAB_DEBUG.md).
 
-## Configuration
+## Options
 
-Environment variables (or CLI flags, see `ouster-demo serve --help`):
+| Env var / flag | Meaning |
+|---|---|
+| `OUSTER_SOURCE` / `--source` | sensor hostname/IP, or path to `.pcap` / `.osf` |
+| `PORT` / `--port` | UI port (default 8080) |
+| `OUSTER_NO_AUTO_UDP_DEST`, `OUSTER_LIDAR_PORT`, `OUSTER_IMU_PORT`, `OUSTER_NO_REINIT`, `OUSTER_SOFT_ID_CHECK`, `OUSTER_TIMEOUT` | advanced sensor/network behaviour, see `.env.example` |
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `OUSTER_SOURCE` | *(empty)* | sensor hostname/IP or `.pcap`/`.osf` path; empty = enter in UI |
-| `PORT` | `8080` | web UI port |
-| `OUSTER_FPS` | `10` | frame-rate cap (replay pacing and UI) |
-| `OUSTER_TIMEOUT` | `5` | seconds to wait for packets |
-| `OUSTER_LIDAR_PORT` / `OUSTER_IMU_PORT` | `0` | fixed UDP ports (0 = SDK default) |
-| `OUSTER_NO_AUTO_UDP_DEST` | `0` | don't let the SDK set the sensor's `udp_dest` |
-| `OUSTER_NO_REINIT` | `0` | never reinitialize the sensor |
-| `OUSTER_SOFT_ID_CHECK` | `0` | tolerate `init_id`/serial mismatch |
+Record a run for later replay: `ouster-cli source <ip> save data/run.pcap`, then use `/data/run.pcap` as the source.
 
-Perception thresholds (max range, max height, ground tolerance, cluster gap, min points) can be tuned
-live in the UI under **Perception tuning**; defaults are in `src/ouster_demo/config.py`.
-
-## Layout
+## How it works
 
 ```
-src/ouster_demo/
-  sources/ouster_source.py   Ouster SDK -> Frame (live sensor, pcap, osf)
-  perception/                ground.py · cluster.py · boxes.py · tracker.py · pipeline.py
-  engine.py                  source -> perception -> encoded frame, auto-reconnect
-  server.py, protocol.py     FastAPI app, WebSocket binary frame format
-  doctor.py, cli.py          diagnostics and entry point
-  web/                       index.html · style.css · app.js · vendored three.js, fonts, logo
-  dev/sim_source.py          test-only synthetic OS0/OS2 generator (used by the test-suite, not by the product)
-tests/                       pipeline + server tests (no hardware needed)
-docs/LAB_DEBUG.md            real-sensor troubleshooting
+Ouster sensor ──UDP──▶ ouster-sdk ──▶ Frame(xyz, range, reflectivity)
+                                         │
+                       perception/  ground ▸ cluster ▸ boxes ▸ tracker
+                                         │
+              engine (thread, auto-reconnect) ──▶ binary WebSocket (8 B/point + JSON header)
+                                         │
+                              FastAPI  ──▶  web/ (Three.js)
 ```
 
-## Notes and limits
+* `src/ouster_demo/sources/` – SDK adapter (the only place that touches the SDK)
+* `src/ouster_demo/perception/` – the perception stack; swap in a learned detector by replacing
+  `cluster.py`/`boxes.py` and returning `Detection` objects
+* `src/ouster_demo/engine.py` – source → perception → publish, with reconnect/backoff and error surfacing
+* `src/ouster_demo/web/` – UI (vendored Three.js + Inter / IBM Plex Mono fonts)
+* `tests/` – pipeline + server tests using a test-only simulator in `ouster_demo/dev` (`make test`)
 
-* Velocities are in the **sensor frame**: correct in world terms when the sensor is stationary.
-  On a moving platform they are relative (no ego-motion compensation).
-* Classification is geometric (size/shape rules), tuned for people, bikes and cars. It is not a
-  learned detector; swapping one in means producing `Detection` objects from `perception/boxes.py`.
-* The ground model is one plane. Ramps and uneven floors will leak ground into objects.
-* Objects seen from one side only get their depth filled from a class prior.
-* Tests: `make test` (needs no sensor). On machines with ROS sourced, the Makefile sets
-  `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1` to avoid ROS's pytest plugins breaking collection.
-* The Ouster SDK is under its own license (BSD-3-Clause + Ouster freeware EULA); Three.js is MIT; Inter and IBM Plex Mono are OFL.
+## Notes / limitations
+
+* Perception is **classical** (no neural network), which keeps it deterministic, CPU-only and dependency-free.
+  Class labels are geometric heuristics, tuned for people/vehicles; indoors, furniture can be mislabelled.
+* Speeds are in the sensor frame: correct in world terms for a stationary sensor.
+* Defaults assume a stationary sensor that can see some floor; tune *Perception tuning* in the UI otherwise.

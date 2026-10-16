@@ -6,7 +6,8 @@ Real Ouster sensor → real-time perception → browser UI. One container, no cl
 * **Perception** (CPU, ~20 ms/frame): ground-plane RANSAC → voxel/Euclidean clustering → oriented 3D boxes →
   rule-based classification (pedestrian / cyclist / car / truck / structure) → Kalman multi-object tracking
   (IDs, speed, heading, trails)
-* **UI**: Three.js viewer in General Autonomy branding. Colour by class / height / intensity / range, live
+* **UI**: Three.js viewer in General Autonomy branding: split **BEV (top-down) | 3D** view with thin, depth-faded
+  lidar-style points. Colour by scan (height × intensity) / class / height / intensity / range, live
   tuning sliders, object list, pipeline timing, one-click source switching. Fully offline (no CDN).
 
 > Verified on an **OS0-32, firmware 2.1.2**. Because that firmware predates the SDK 1.x metadata API, the SDK is
@@ -17,7 +18,8 @@ Real Ouster sensor → real-time perception → browser UI. One container, no cl
 ```bash
 cp .env.example .env          # set OUSTER_SOURCE=<sensor ip>   (or leave empty and type it in the UI)
 docker compose up -d --build
-# open http://localhost:8080   (or http://<this-pc-ip>:8080 from another machine)
+# open http://genauto.localhost   (PORT=80 in .env; any *.localhost name resolves to this PC, no setup)
+# from another machine: http://<this-pc-ip>:<PORT>
 ```
 
 Docker uses `network_mode: host` on purpose: the sensor pushes UDP to this machine and bridge networking breaks

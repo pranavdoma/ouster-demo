@@ -23,15 +23,35 @@ const el = {
 /* ------------------------------------------------------------------ three.js scene */
 const renderer = new THREE.WebGLRenderer({ canvas: el.canvas, antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.setClearColor(0x090d13, 1);
+renderer.autoClear = false;
+renderer.setScissorTest(true);
 const scene = new THREE.Scene();
+const pane3d = $("pane3d"), paneBev = $("paneBev"), mainEl = document.querySelector("main");
+
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 600);
 camera.position.set(-9, 7, 0);
-const controls = new OrbitControls(camera, el.canvas);
+const controls = new OrbitControls(camera, pane3d);
 controls.target.set(2, 0, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.maxPolarAngle = Math.PI * 0.495;
 controls.autoRotateSpeed = 0.8;
+
+// Bird's-eye view: orthographic, looking straight down, sensor forward (+X) is screen-up.
+const BEV_HALF = 9;                      // metres from centre to top edge at zoom 1
+const bevCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 300);
+bevCam.up.set(1, 0, 0);
+bevCam.position.set(0, 80, 0);
+bevCam.lookAt(0, 0, 0);
+const bevControls = new OrbitControls(bevCam, paneBev);
+bevControls.enableRotate = false;
+bevControls.screenSpacePanning = true;
+bevControls.enableDamping = true;
+bevControls.dampingFactor = 0.1;
+bevControls.zoomSpeed = 1.2;
+bevControls.minZoom = 0.25; bevControls.maxZoom = 12;
+bevControls.update();
 
 // Sensor frame (x fwd, y left, z up)  ->  three.js (x, z, -y): a proper rotation, Y up.
 const S2T = (x, y, z) => new THREE.Vector3(x, z, -y);
@@ -47,16 +67,17 @@ geom.setAttribute("aTag", new THREE.BufferAttribute(tagArr, 1).setUsage(THREE.Dy
 geom.setDrawRange(0, 0);
 
 const pointMat = new THREE.ShaderMaterial({
+  transparent: true, depthWrite: false,
   uniforms: {
-    uSize: { value: 3.0 }, uMode: { value: 2 }, uShowGround: { value: 1 },
+    uSize: { value: 1.6 }, uMode: { value: 4 }, uShowGround: { value: 1 }, uFixed: { value: 0 },
     uPx: { value: renderer.getPixelRatio() }, uGroundY: { value: -1.8 },
   },
   vertexShader: /* glsl */ `
     attribute float aRefl; attribute float aTag;
-    uniform float uSize, uMode, uShowGround, uPx, uGroundY;
+    uniform float uSize, uMode, uShowGround, uPx, uGroundY, uFixed;
     varying vec3 vColor; varying float vA;
     vec3 ramp(float t) {
-      vec3 c0 = vec3(0.09, 0.19, 0.33), c1 = vec3(0.25, 0.71, 0.87), c2 = vec3(0.95, 0.96, 0.97), c3 = vec3(0.96, 0.51, 0.12);
+      vec3 c0 = vec3(0.13, 0.29, 0.52), c1 = vec3(0.25, 0.71, 0.87), c2 = vec3(0.95, 0.96, 0.97), c3 = vec3(0.96, 0.51, 0.12);
       t = clamp(t, 0., 1.);
       if (t < .4) return mix(c0, c1, t / .4);
       if (t < .75) return mix(c1, c2, (t - .4) / .35);
@@ -75,23 +96,27 @@ const pointMat = new THREE.ShaderMaterial({
       vec4 mv = modelViewMatrix * vec4(position, 1.0);
       gl_Position = projectionMatrix * mv;
       float rng = length(position.xz);
-      if (uMode < .5)       vColor = ramp((position.y - uGroundY) / 4.5);
-      else if (uMode < 1.5) vColor = mix(vec3(0.12, 0.18, 0.27), vec3(1.0, 0.86, 0.68), clamp(aRefl / 140., 0., 1.));
+      float ht = clamp((position.y - uGroundY) / 3.0, 0., 1.);
+      vA = 1.0 - 0.5 * clamp(rng / 28., 0., 1.);               // distance fade: depth cue like a real scan
+      if (uMode < .5)       vColor = ramp(ht * 1.4);
+      else if (uMode < 1.5) vColor = mix(vec3(0.12, 0.2, 0.32), vec3(1.0, 0.88, 0.7), clamp(aRefl / 140., 0., 1.));
       else if (uMode < 2.5) vColor = classColor(aTag);
-      else                  vColor = ramp(rng / 50.);
-      vA = 1.0;
-      if (aTag > .5 && aTag < 1.5) {
-        if (uShowGround < .5) gl_Position = vec4(2., 2., 2., 1.);
-        if (uMode > 1.5 && uMode < 2.5) vA = .75;
+      else if (uMode < 3.5) vColor = ramp(rng / 14.);
+      else {                                                    // "Scan": height palette x return intensity, objects tinted by class
+        float inten = 0.5 + 0.5 * clamp(aRefl / 110., 0., 1.);
+        vColor = ramp(0.05 + ht * 0.95) * inten;
+        if (aTag > 2.5) { vColor = mix(vColor, classColor(aTag) * 1.3, 0.8); vA = max(vA, 0.9); }
+        if (aTag > .5 && aTag < 1.5) vA *= 0.55;                // floor stays a quiet backdrop
       }
-      gl_PointSize = clamp(uSize * uPx * (24.0 / -mv.z), 1.5 * uPx, 9.0 * uPx);
+      if (aTag > .5 && aTag < 1.5 && uShowGround < .5) gl_Position = vec4(2., 2., 2., 1.);
+      gl_PointSize = uFixed > 0. ? uFixed * uPx : clamp(uSize * uPx * (7.0 / -mv.z), 1.0 * uPx, 3.4 * uPx);
     }`,
   fragmentShader: /* glsl */ `
     varying vec3 vColor; varying float vA;
     void main() {
-      vec2 c = gl_PointCoord - .5;
-      if (dot(c, c) > .25) discard;
-      gl_FragColor = vec4(vColor * vA, 1.0);
+      float d = length(gl_PointCoord - .5) * 2.;
+      if (d > 1.) discard;
+      gl_FragColor = vec4(vColor, vA * smoothstep(1.0, 0.45, d));   // soft, anti-aliased dot
     }`,
 });
 const points = new THREE.Points(geom, pointMat);
@@ -218,31 +243,61 @@ function updateTracks(list) {
 }
 
 function projectLabels() {
-  const w = el.canvas.clientWidth, h = el.canvas.clientHeight;
   const v = new THREE.Vector3();
+  const r = rect3d;
   for (const e of tracks.values()) {
     if (!e.anchor || e.label.style.display === "none") continue;
     v.copy(e.anchor).project(camera);
-    if (v.z > 1 || v.z < -1) { e.label.style.visibility = "hidden"; continue; }
+    if (!r.visible || v.z > 1 || v.z < -1) { e.label.style.visibility = "hidden"; continue; }
     e.label.style.visibility = "visible";
-    e.label.style.transform = `translate3d(${((v.x * 0.5 + 0.5) * w).toFixed(1)}px, ${((-v.y * 0.5 + 0.5) * h).toFixed(1)}px, 0) translate(-50%, -100%)`;
+    e.label.style.transform = `translate3d(${(r.x + (v.x * 0.5 + 0.5) * r.w).toFixed(1)}px, ${(r.y + (-v.y * 0.5 + 0.5) * r.h).toFixed(1)}px, 0) translate(-50%, -100%)`;
   }
 }
 
 /* ------------------------------------------------------------------ resize + render loop */
+function paneRect(pane) {
+  const r = pane.getBoundingClientRect();
+  return { x: r.left, y: r.top, w: r.width, h: r.height, visible: r.width > 2 && r.height > 2 };
+}
 function resize() {
-  const w = el.canvas.clientWidth, h = el.canvas.clientHeight;
-  renderer.setSize(w, h, false);
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  renderer.setSize(el.canvas.clientWidth, el.canvas.clientHeight, false);
 }
 window.addEventListener("resize", resize);
 resize();
 
+function renderPane(r, cam) {
+  const H = el.canvas.clientHeight;
+  const y = H - (r.y + r.h);
+  renderer.setViewport(r.x, y, r.w, r.h);
+  renderer.setScissor(r.x, y, r.w, r.h);
+  renderer.clearDepth();
+  renderer.render(scene, cam);
+}
+
+let rect3d = paneRect(pane3d);
 renderer.setAnimationLoop(() => {
   controls.autoRotate = ui.spin;
   controls.update();
-  renderer.render(scene, camera);
+  bevControls.update();
+  renderer.setScissor(0, 0, el.canvas.clientWidth, el.canvas.clientHeight);
+  renderer.setViewport(0, 0, el.canvas.clientWidth, el.canvas.clientHeight);
+  renderer.clear();
+
+  const rb = paneRect(paneBev);
+  if (rb.visible) {
+    const asp = rb.w / rb.h;
+    bevCam.left = -BEV_HALF * asp; bevCam.right = BEV_HALF * asp; bevCam.top = BEV_HALF; bevCam.bottom = -BEV_HALF;
+    bevCam.updateProjectionMatrix();
+    pointMat.uniforms.uFixed.value = pointMat.uniforms.uSize.value * 1.15;
+    renderPane(rb, bevCam);
+  }
+  rect3d = paneRect(pane3d);
+  if (rect3d.visible) {
+    camera.aspect = rect3d.w / rect3d.h;
+    camera.updateProjectionMatrix();
+    pointMat.uniforms.uFixed.value = 0;
+    renderPane(rect3d, camera);
+  }
   projectLabels();
 });
 
@@ -405,6 +460,18 @@ document.querySelectorAll("#colorMode button").forEach((b) => b.addEventListener
   pointMat.uniforms.uMode.value = +b.dataset.mode;
 }));
 
+document.querySelectorAll("#layoutMode button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("#layoutMode button").forEach((x) => x.classList.toggle("on", x === b));
+  mainEl.dataset.layout = b.dataset.layout;
+  localStorage.setItem("layout", b.dataset.layout);
+}));
+{ // restore last layout (default: split BEV | 3D)
+  const l = localStorage.getItem("layout") || "split";
+  const btn = document.querySelector(`#layoutMode button[data-layout="${l}"]`);
+  mainEl.dataset.layout = btn ? l : "split";
+  if (btn) document.querySelectorAll("#layoutMode button").forEach((x) => x.classList.toggle("on", x === btn));
+}
+
 function tween(pos, target) {
   const p0 = camera.position.clone(), t0 = controls.target.clone(), t = performance.now();
   const step = () => {
@@ -415,7 +482,7 @@ function tween(pos, target) {
   step();
 }
 $("vChase").onclick = () => tween(new THREE.Vector3(-9, 7, 0), new THREE.Vector3(2, 0, 0));
-$("vTop").onclick = () => tween(new THREE.Vector3(0.01, 22, 0), new THREE.Vector3(0, 0, 0));
+$("vTop").onclick = () => { tween(new THREE.Vector3(0.01, 22, 0), new THREE.Vector3(0, 0, 0)); bevControls.reset(); };
 $("vSpin").onclick = (e) => { ui.spin = !ui.spin; e.target.classList.toggle("on", ui.spin); };
 
 /* perception sliders */

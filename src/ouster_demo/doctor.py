@@ -98,30 +98,31 @@ def check_http(ip: str):
     base = f"http://{ip}"
     out = {}
     for name, path in (
-        ("sensor_info", "/api/v1/sensor/metadata/sensor_info"),
+        ("firmware", "/api/v1/system/firmware"),
         ("config", "/api/v1/sensor/config"),
-        ("lidar_data_format", "/api/v1/sensor/metadata/lidar_data_format"),
+        ("sensor_info", "/api/v1/sensor/metadata/sensor_info"),
     ):
         try:
             r = requests.get(base + path, timeout=4)
             r.raise_for_status()
             out[name] = r.json()
-        except Exception as exc:  # noqa: BLE001
-            _p(
-                FAIL if name == "sensor_info" else WARN,
-                f"GET {path}: {type(exc).__name__}: {exc}",
-                "The sensor HTTP API (port 80) is unreachable. Wrong IP, different subnet, or a firewall." if name == "sensor_info" else "",
-            )
+        except requests.HTTPError as exc:
             if name == "sensor_info":
+                _p(WARN, "sensor_info endpoint missing (HTTP 404): sensor runs OLD firmware (<2.2)",
+                   "Use ouster-sdk==0.12.0 (pinned in this project); SDK 0.13+/1.x need newer firmware.")
+            else:
+                _p(WARN, f"GET {path}: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            _p(FAIL, f"GET {path}: {type(exc).__name__}: {exc}",
+               "The sensor HTTP API (port 80) is unreachable. Wrong IP, different subnet, or a firewall.")
+            if name == "firmware":
                 return None
+    fw = out.get("firmware", {}).get("fw") or out.get("sensor_info", {}).get("image_rev")
     si = out.get("sensor_info", {})
-    _p(OK, f"sensor: {si.get('prod_line')} S/N {si.get('prod_sn')} FW {si.get('image_rev')} status={si.get('status')}")
-    status = str(si.get("status", "")).upper()
-    if status and status not in ("RUNNING",):
-        _p(WARN, f"sensor status is {status}, expected RUNNING", "Give it ~30 s after power-up; STANDBY means operating_mode=STANDBY.")
+    _p(OK, f"sensor firmware: {fw}" + (f" ({si.get('prod_line')} S/N {si.get('prod_sn')})" if si else ""))
     cfg = out.get("config", {})
     if cfg:
-        keys = ("lidar_mode", "udp_dest", "udp_port_lidar", "udp_port_imu", "operating_mode", "timestamp_mode", "udp_profile_lidar", "columns_per_packet", "azimuth_window")
+        keys = ("lidar_mode", "udp_dest", "udp_port_lidar", "udp_port_imu", "operating_mode", "timestamp_mode", "azimuth_window")
         _p(OK, "config: " + ", ".join(f"{k}={cfg[k]}" for k in keys if k in cfg))
         if str(cfg.get("operating_mode", "NORMAL")).upper() == "STANDBY":
             _p(WARN, "operating_mode is STANDBY - the sensor is not spinning/streaming", "Set to NORMAL (the SDK does this automatically when it reinitializes).")
@@ -202,13 +203,11 @@ def check_udp(port: int, seconds: float, expect_ip: Optional[str]) -> None:
 
 def check_sdk(source: str, open_kwargs: dict) -> None:
     try:
-        from ouster.sdk import open_source, core
+        from ouster.sdk import open_source, client
         import numpy as np
     except Exception as exc:  # noqa: BLE001
-        _p(FAIL, f"ouster-sdk import failed: {exc}", "pip install 'ouster-sdk==1.0.1'")
+        _p(FAIL, f"ouster-sdk import failed: {exc}", "pip install 'ouster-sdk==0.12.0'")
         return
-    import ouster.sdk as _sdk  # noqa: F401
-
     try:
         from importlib.metadata import version
 
@@ -217,29 +216,25 @@ def check_sdk(source: str, open_kwargs: dict) -> None:
         pass
     t0 = time.time()
     try:
-        src = open_source(source, collate=False, **open_kwargs)
+        src = open_source(source, **open_kwargs)
     except Exception as exc:  # noqa: BLE001
-        _p(FAIL, f"open_source failed: {exc}", "Read the message above: HTTP errors = reachability; 'Unsupported firmware' = SDK/FW mismatch.")
+        _p(FAIL, f"open_source failed: {exc}", "HTTP/connect errors = reachability; 404 on sensor_info = SDK too new for this firmware.")
         return
-    info = src.sensor_info[0]
+    info = src.metadata
     _p(OK, f"SDK connected in {time.time() - t0:.1f}s: {info.prod_line} {info.format.pixels_per_column}x{info.format.columns_per_frame} @ {info.format.fps} Hz, FW {info.fw_rev}")
-    lut = core.XYZLut(info)
+    lut = client.XYZLut(info)
     got = 0
     t_start = time.time()
-    for fs in src:
-        f = fs[0]
-        if f is None:
-            continue
-        rng = np.asarray(f.field(core.ChanField.RANGE))
+    for scan in src:
+        rng = np.asarray(scan.field(client.ChanField.RANGE))
         valid = rng > 0
-        xyz = np.asarray(lut(f))
-        pts = xyz[valid]
+        pts = np.asarray(lut(scan))[valid]
         got += 1
         _p(
             OK if valid.mean() > 0.2 else WARN,
             f"frame {got}: {valid.mean() * 100:.0f}% valid pixels, {valid.sum()} points, "
             f"max range {rng.max() / 1000:.1f} m, z span {pts[:, 2].min():.2f}..{pts[:, 2].max():.2f} m",
-            "" if valid.mean() > 0.2 else "Very few returns: sensor facing a wall / dome cap on / dirty window / range clipped?",
+            "" if valid.mean() > 0.2 else "Very few returns: sensor facing a wall / dome cap on / dirty window?",
         )
         if got >= 5 or time.time() - t_start > 20:
             break
@@ -249,6 +244,8 @@ def check_sdk(source: str, open_kwargs: dict) -> None:
         src.close()
     except Exception:  # noqa: BLE001
         pass
+    sys.stdout.flush()
+    os._exit(0)  # the SDK's receive thread can keep the process alive after close()
 
 
 def run(host: str, sdk: bool = False, listen: float = 4.0, lidar_port: int = 7502, open_kwargs: Optional[dict] = None) -> int:
@@ -284,13 +281,17 @@ def run(host: str, sdk: bool = False, listen: float = 4.0, lidar_port: int = 750
     return 0 if reachable else 1
 
 
-def discover(timeout: float = 5.0) -> int:
+def discover(timeout: float = 8.0) -> int:
     """Find sensors on the LAN (wraps the SDK's own `ouster-cli discover`)."""
     exe = shutil.which("ouster-cli") or os.path.join(os.path.dirname(sys.executable), "ouster-cli")
     if not os.path.exists(exe):
         print("ouster-cli not found; reinstall ouster-sdk")
         return 1
-    return subprocess.call([exe, "discover"], timeout=max(timeout, 10))
+    print("Searching for Ouster sensors (Ctrl+C to stop)...")
+    try:
+        return subprocess.call([exe, "discover"], timeout=max(timeout, 10) * 2)
+    except (subprocess.TimeoutExpired, KeyboardInterrupt):
+        return 0
 
 
 if __name__ == "__main__":  # pragma: no cover

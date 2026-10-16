@@ -25,7 +25,7 @@ class PerceptionParams:
     voxel_m: float = 0.20             # clustering voxel size
     cluster_eps_m: float = 0.55       # voxel-center connectivity radius
     min_cluster_points: int = 25      # minimum raw points for an object
-    max_extent_m: float = 14.0        # clusters bigger than this are "structure" (walls, buildings)
+    max_extent_m: float = 8.0         # clusters bigger than this are "structure" (walls, buildings)
 
     def update(self, values: dict) -> None:
         for key, val in values.items():

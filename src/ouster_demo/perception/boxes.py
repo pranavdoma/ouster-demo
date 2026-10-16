@@ -65,6 +65,8 @@ def classify(length: float, width: float, height: float, max_extent: float) -> s
         return "truck"
     if length < 3.0 and width < 1.5 and height < 0.9:
         return "debris"
+    if max(length, width) >= 3.0:     # big thing that is not a vehicle: wall, partition, shelving
+        return "structure"
     return "unknown"
 
 
@@ -96,7 +98,7 @@ def build_detections(
         # z of the ground plane directly under this cluster, in the sensor frame
         ground_z = float((p[:, 2] - h).mean())
         cls = classify(max(length, 0.2), max(width, 0.2), height, max_extent)
-        if width < 0.6 and length >= 1.2 and cls in ("unknown", "pedestrian", "cyclist", "debris"):
+        if width < 0.6 and 1.2 <= length <= 9.5 and cls in ("unknown", "pedestrian", "cyclist", "debris", "structure"):
             # Only one face of the object is visible (flat slab), so its depth is unobservable.
             # Fill it in from a class prior and push the box centre away from the sensor.
             prior_w = 0.7 if length < 2.5 else (1.9 if length <= 6.6 else 2.5)

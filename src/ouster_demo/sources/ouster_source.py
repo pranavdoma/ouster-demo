@@ -32,10 +32,10 @@ class OusterSource(FrameSource):
         live: bool = True,
         open_kwargs: Optional[dict] = None,
     ):
-        # Imported lazily so the simulator works even if the SDK failed to install.
-        from ouster.sdk import open_source, core  # noqa: WPS433
+        # Imported lazily so tooling (tests, `doctor`) works even if the SDK failed to install.
+        from ouster.sdk import open_source, client  # noqa: WPS433
 
-        self._core = core
+        self._core = client
         self._url = url
         self._live = live
         self._loop = loop and not live
@@ -44,9 +44,9 @@ class OusterSource(FrameSource):
         self._open_kwargs = open_kwargs or {}
 
         log.info("Opening Ouster source %r (this can take a few seconds for a live sensor)", url)
-        self._src = open_source(url, collate=False, **self._open_kwargs)
-        self._info = self._src.sensor_info[0]
-        self._lut = core.XYZLut(self._info)
+        self._src = open_source(url, **self._open_kwargs)
+        self._info = self._src.metadata
+        self._lut = client.XYZLut(self._info)
         fmt = self._info.format
         self._meta = SensorMeta(
             model=str(self._info.prod_line or "Ouster"),
@@ -68,7 +68,7 @@ class OusterSource(FrameSource):
             self._src.close()
         except Exception:  # noqa: BLE001
             pass
-        self._src = self._open_source(self._url, collate=False, **self._open_kwargs)
+        self._src = self._open_source(self._url, **self._open_kwargs)
 
     def frames(self) -> Iterator[Frame]:
         core = self._core
@@ -76,14 +76,13 @@ class OusterSource(FrameSource):
         next_t = time.monotonic()
         while True:
             produced = 0
-            for frame_set in self._src:
-                lf: Optional[object] = frame_set[0] if len(frame_set) else None
+            for lf in self._src:
                 if lf is None:
                     continue
                 produced += 1
                 rng = np.asarray(lf.field(core.ChanField.RANGE))
                 xyz = np.asarray(self._lut(lf), dtype=np.float32)
-                if lf.has_field(core.ChanField.REFLECTIVITY):
+                if core.ChanField.REFLECTIVITY in lf.fields:
                     refl = np.clip(np.asarray(lf.field(core.ChanField.REFLECTIVITY)), 0, 255).astype(np.uint8)
                 else:
                     refl = np.zeros(rng.shape, np.uint8)
